@@ -6,8 +6,6 @@ import numpy as np
 import warnings
 warnings.filterwarnings('ignore')
 
-pd.set_option("display.precision", 2)
-
 CSV_PATH = '17f.csv'
 
 @st.cache
@@ -33,46 +31,8 @@ def load_data():
 
     return df
 
-st.title('Semester 6 marks analysis')
-st.header('Lets have a look at the marks scored by all students')
-# st.empty()
-
-clean_df = load_data()
-student_df = clean_df.iloc[:, :5].set_index('RollNo').sort_values(by=['SGPA', 'CGPA'], ascending=False)
-
-# students marks filter
-st.sidebar.header('Students marks analysis')
-
-# cg filter
-cg_slider = st.sidebar.slider("CGPA Filter", 0.0, 10.0, (0.0, 10.0), 0.1, format='%f')
-
-# sg filter
-sg_slider = st.sidebar.slider("SGPA Filter", 0.0, 10.0, (0.0, 10.0), 0.1, format='%f')
-
-
-# dep filter
-dep_options = student_df['Dept'].unique()
-dep_options = np.insert(dep_options, 0, 'ALL') 
-dep_filter = st.sidebar.selectbox('Department', dep_options)
-
-filter_student_df = student_df.query(
-    f'SGPA <= {str(sg_slider[1])} & SGPA >= {str(sg_slider[0])} \
-        & CGPA <= {str(cg_slider[1])} & CGPA >= {str(cg_slider[0])}'
-)
-
-if dep_filter != 'ALL':
-    filter_student_df.query(f'Dept == "{dep_filter}"', inplace=True)
-
-# is_name_filter = st.checkbox(('Find a name'))
-name_filter = st.sidebar.multiselect('Name', student_df['Name'].values)
-
-if len(name_filter) >= 1:
-    filter_student_df = filter_student_df.loc[filter_student_df['Name'].isin(name_filter)]
-
-st.dataframe(filter_student_df)
-
-if name_filter:
-    student_name = name_filter[-1]
+def plot_subject_grades(selected_names):
+    student_name = selected_names[-1]
     student_subjects = clean_df.loc[clean_df['Name'] == student_name]
     
     student_sub_df = student_subjects[['Subject1', 'Grade1']].rename(columns={ 'Subject1': 'Subject', 'Grade1': 'Grade' })
@@ -85,69 +45,158 @@ if name_filter:
     
     student_sub_df = student_sub_df.dropna().drop_duplicates()
     
-    fig = px.strip(student_sub_df, x='Subject', y='Grade', title=f'{student_name}', 
-                   category_orders={ 'Grade': ['EX', 'A', 'B', 'C', 'D', 'P', 'F', 'X', 'Y']}, height=450, width=600)
-    
-    st.plotly_chart(fig, use_container_width=True)
-    # st.write(student_name)
+    strip_fig = px.strip(student_sub_df, x='Subject', y='Grade', 
+                   category_orders={ 'Grade': ['EX', 'A', 'B', 'C', 'D', 'P', 'F', 'X', 'Y']})
 
-st.write('We can have a look at various statistical properties of SGPA in each department.\
-     We can have a look at the histogram plot of SGPA and CGPA in a specific department by clicking it in the table')
+    return strip_fig
+
+def get_subject_df(marks_data):
+    sub_df = marks_data[['Subject1', 'Grade1']].rename(columns={ 'Subject1': 'Subject', 'Grade1': 'Grade' })
+
+    for i in range(2, 12):
+
+        sub_df = pd.concat([sub_df, 
+            df_marks[[f'Subject{i}', f'Grade{i}']].rename(columns={ f'Subject{i}': 'Subject', f'Grade{i}': 'Grade' })], 
+                            ignore_index=True)
+        
+    sub_df = sub_df.drop(sub_df.loc[sub_df['Subject'] == 0].index, axis=0).reset_index(drop=True)
+
+    return sub_df
+
+def get_sub_dist_df(marks_data, min_students):
+    sub_df = get_subject_df(marks_data)
+
+    subject_dist = sub_df.groupby('Subject')['Grade'].agg(['mean', 'count']).sort_values(['mean', 'count'], ascending=False).reset_index()
+    subject_dist = subject_dist.loc[subject_dist['count'] >= min_students]
+
+    return subject_dist
+
+def plot_subject_pie(marks_data, subject_name):
+    df = get_subject_df(marks_data)
+
+    temp_subject = df[df['Subject'] == subject_name].groupby(
+                            ['Grade']).count().reset_index(level=[0])
+        
+    temp_subject['Grade'] = temp_subject['Grade'].replace(
+        {10: 'EX', 9: 'A', 8: 'B', 7: 'C', 6: 'D', 5: 'P', 0: 'F'})
+
+    temp_subject = temp_subject.rename(columns={'Subject': 'Count'})
+
+    pie_fig = px.pie(temp_subject, values='Count', names='Grade')
+    pie_fig.update_traces(textinfo='percent+label')
+
+    return pie_fig
+
+if __name__ == '__main__':
+
+    st.title('IIT-KGP Marks EDA :sunglasses:')
+
+    st.write('We have the marks of 3rd year students of Spring Semester 2019-2020. \
+        This is a simple app which helps us do some analysis of the marks obtained by students, average marks in a department \
+            and see how tough is a particular course')
+
+    st.info('All the tables can be sorted by any column by clicking on the column name')
+
+    st.header('All students SGPA and CGPA :fire:')
+
+    st.write('We can have a look at the score obtained by all students sorted by SGPA column by default')
+
+    # st.empty()
+
+    clean_df = load_data()
+    student_df = clean_df.iloc[:, :5].set_index('RollNo').sort_values(by=['SGPA', 'CGPA'], ascending=False)
+
+    st.sidebar.title('Filters')
+    st.sidebar.markdown('##### Can be used to filter out the table in a specific CGPA/SGPA range')
+    cg_slider = st.sidebar.slider("CGPA Filter", 0.0, 10.0, (0.0, 10.0), 0.1, format='%f')
+    sg_slider = st.sidebar.slider("SGPA Filter", 0.0, 10.0, (0.0, 10.0), 0.1, format='%f')
 
 
-dept_df = pd.DataFrame(clean_df.groupby('Dept')['SGPA'].agg(['max', 'min', 'mean', 'median'])).reset_index()
+    st.sidebar.markdown('##### By selecting a department, we see the histogram of the CGPA and SGPA')
+    # dep filter
+    dep_options = sorted(student_df['Dept'].unique().tolist())
+    dep_options = ['ALL'] + dep_options 
+    dep_filter = st.sidebar.selectbox('Department', dep_options)
 
-if dep_filter != 'ALL':
-    hist_fig = px.histogram(clean_df.loc[clean_df.Dept == dep_filter], x=['SGPA', 'CGPA'], barmode="overlay",
-                            title=f'Marks Distribution among students in {dep_filter}', height=450, width=550)
+    filter_student_df = student_df.query(
+        f'SGPA <= {str(sg_slider[1])} & SGPA >= {str(sg_slider[0])} \
+            & CGPA <= {str(cg_slider[1])} & CGPA >= {str(cg_slider[0])}'
+    )
 
-    st.plotly_chart(hist_fig, use_container_width=True)
+    if dep_filter != 'ALL':
+        filter_student_df.query(f'Dept == "{dep_filter}"', inplace=True)
 
-st.dataframe(dept_df, width=500,)
+    # is_name_filter = st.checkbox(('Find a name'))
+    st.sidebar.markdown('##### We can look into the grades of a particular student by searching here')
+    name_filter = st.sidebar.multiselect('Name', student_df['Name'].values)
 
-grade_col_names = [
-    'Grade1', 'Grade2', 'Grade3', 'Grade4', 'Grade5', 'Grade6', 'Grade7', 'Grade8', 'Grade9', 'Grade10', 'Grade11'
-]
+    if name_filter:
+        filter_student_df = filter_student_df.loc[filter_student_df['Name'].isin(name_filter)]
 
-df_marks = clean_df.copy()
-df_marks[grade_col_names] = df_marks[grade_col_names].replace({
-    'EX': 10,
-    'A': 9,
-    'B': 8,
-    'C': 7,
-    'D': 6,
-    'P': 5,
-    'X': 0,
-    'F': 0,
-    'Y': 0,
-})
-df_marks = df_marks.fillna(0)
+        subject_figure = plot_subject_grades(name_filter)
+        
 
-subject_df = df_marks[['Subject1', 'Grade1']].rename(columns={ 'Subject1': 'Subject', 'Grade1': 'Grade' })
+    st.dataframe(filter_student_df.reset_index().style.format({'SGPA': '{:.2f}', 'CGPA': '{:.2f}'}))
 
-for i in range(2, 12):
-    subject_df = pd.concat([subject_df, 
-           df_marks[[f'Subject{i}', f'Grade{i}']].rename(columns={ f'Subject{i}': 'Subject', f'Grade{i}': 'Grade' })], 
-                           ignore_index=True)
-    
-subject_df = subject_df.drop(subject_df.loc[subject_df['Subject'] == 0].index, axis=0).reset_index(drop=True)
+    if name_filter:
+        st.subheader(f'{name_filter[-1]}')
 
-subject_dist = subject_df.groupby('Subject')['Grade'].agg(['mean', 'count']).sort_values(['mean', 'count'], ascending=False).reset_index()
-subject_dist = subject_dist.loc[subject_dist['count'] >= 10]
+        st.plotly_chart(subject_figure, use_container_width=True)
 
-st.dataframe(subject_dist)
+    st.header('Departments :mortar_board:')
 
-subject_filter = st.text_input('Subject name', value='NA31002')
+    dept_df = pd.DataFrame(clean_df.groupby('Dept')['SGPA'].agg(['max', 'min', 'mean', 'median'])).reset_index()
 
-temp_subject = subject_df[subject_df['Subject'] == subject_filter].groupby(
-                        ['Grade']).count().reset_index(level=[0])
-    
-temp_subject['Grade'] = temp_subject['Grade'].replace(
-    {10: 'EX', 9: 'A', 8: 'B', 7: 'C', 6: 'D', 5: 'P', 0: 'F'})
+    if dep_filter != 'ALL':
+        st.subheader(f'SGPA and CGPA distribution among students in {dep_filter} :bar_chart:')
+        
+        hist_fig = px.histogram(clean_df.loc[clean_df.Dept == dep_filter], x=['SGPA', 'CGPA'], barmode="overlay")
 
-temp_subject = temp_subject.rename(columns={'Subject': 'Count'})
+        st.plotly_chart(hist_fig, use_container_width=True)
 
-pie_fig = px.pie(temp_subject, values='Count', names='Grade', title=f'Grade distribution for {subject_filter}', height=450, width=550)
-pie_fig.update_traces(textinfo='percent+label')
+    st.write('We can have a look at various statistical properties of SGPA in each department.\
+        We can have a look at the histogram plot of SGPA and CGPA in a specific department by selecting a \
+            a particular department from the sidebar')
 
-st.plotly_chart(pie_fig)
+    st.dataframe(dept_df.style.format({'min': '{:.2f}', 'max': '{:.2f}', 'mean': '{:.2f}', 'median': '{:.2f}'}))
+
+    grade_col_names = [
+        'Grade1', 'Grade2', 'Grade3', 'Grade4', 'Grade5', 'Grade6', 'Grade7', 'Grade8', 'Grade9', 'Grade10', 'Grade11'
+    ]
+
+    df_marks = clean_df.copy()
+    df_marks[grade_col_names] = df_marks[grade_col_names].replace({
+        'EX': 10,
+        'A': 9,
+        'B': 8,
+        'C': 7,
+        'D': 6,
+        'P': 5,
+        'X': 0,
+        'F': 0,
+        'Y': 0,
+    })
+    df_marks = df_marks.fillna(0)
+
+    st.sidebar.markdown('##### We can filter courses where atleast these many students were enrolled')
+    min_students = st.sidebar.slider('Min. students', 1, 210, value=10, step=1, format='%d')
+
+    subject_dist = get_sub_dist_df(df_marks, min_students)
+
+    st.header('Subjects :chart_with_upwards_trend:')
+
+    st.write('We take a look at the average grades obtained by students in a subject. The mean score is \
+        calculated by taking EX=10, A=9 and so on.')
+
+    st.dataframe(subject_dist)
+
+    subject_options = get_sub_dist_df(df_marks, 1)['Subject'].unique().tolist()
+
+    st.sidebar.markdown('##### Select a subject to get the grade distribution')
+    subject_filter = st.sidebar.multiselect('Subject', subject_options)
+
+    if len(subject_filter) >= 1:
+        pie_plot = plot_subject_pie(df_marks, subject_filter[-1])
+
+        st.subheader(f'Grade Distribution for {subject_filter[-1]}')
+        st.plotly_chart(pie_plot)
